@@ -16,8 +16,13 @@ fi
 CONFIG_FILE="$CONFIG"
 
 # Extract SLURM settings from config file
+
+# Extract SLURM settings from config file
 SLURM_PARTITION=$(python -c "import yaml; config = yaml.safe_load(open('$CONFIG_FILE')); print(config['slurm']['partition'])")
 SLURM_ACCOUNT=$(python -c "import yaml; config = yaml.safe_load(open('$CONFIG_FILE')); print(config['slurm']['account'])")
+
+echo "DEBUG: Extracted Partition: '$SLURM_PARTITION'"
+echo "DEBUG: Extracted Account: '$SLURM_ACCOUNT'"
 
 # Ensure we're in the kb conda environment
 if [[ "$CONDA_DEFAULT_ENV" != "kb" ]]; then

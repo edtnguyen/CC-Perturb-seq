@@ -1,4 +1,3 @@
-
 analysis_name: "yann_k562_analysis"
 sample_info_file: "references_yann_k562/sample_info.k562_yann.xlsx"
 plate_maps_file: "references_yann_k562/plate_map.xlsx"
@@ -9,8 +8,8 @@ sample_ids: []
 
 # SLURM cluster configuration
 slurm:
-  partition: "pritch,engreitz,hns,owners,normal"  # Comma-separated list of partitions
-  account: "pritch"  # SLURM account for job submission
+  partition: "engreitz" # Comma-separated list of partitions
+  account: "pritch" # SLURM account for job submission
 
 analysis:
   # Chemistry v2:
@@ -20,20 +19,19 @@ analysis:
   # Chemistry v3:
   # Amplicon: NNNNNNNNNN33333333ATGAGGGGTCAG22222222TCCAACCACCTC11111111
   # kb_chemistry: "1,10,18,1,30,38,1,50,58:1,0,10:0,0,0"
-  kb_chemistry: "1,10,18,1,48,56,1,78,86:1,0,10:0,0,0"  # Using v2 chemistry
-
+  kb_chemistry: "1,10,18,1,48,56,1,78,86:1,0,10:0,0,0" # Using v2 chemistry
 
   # IT IS OPTIONAL TO ADJUST THESE -> -> ->
-  combinations:  # Which source/processing combinations to run
-    - ["main", "raw"]  # Options: ["main", "raw"], ["all", "merged"], etc.
-  strand: "forward"  # Options: "forward" or "unstranded"
+  combinations: # Which source/processing combinations to run
+    - ["main", "raw"] # Options: ["main", "raw"], ["all", "merged"], etc.
+  strand: "forward" # Options: "forward" or "unstranded"
   genome_types: ["all"]
   index_prefix: "nascent"
 
 input_paths:
   # Chemistry v2:
   # - 96-well kit: Use replace.96_v2.txt and barcodes.96_v2.txt
-  # - 48-well kit: Use replace.48_v2.txt and barcodes.48_v2.txt  
+  # - 48-well kit: Use replace.48_v2.txt and barcodes.48_v2.txt
   # - Mini kit (12-well): Use replace.12_v2.txt and barcodes.12_v2.txt
   #
   # Chemistry v3:
@@ -53,16 +51,14 @@ input_paths:
   # - 48-well: bc_data_n141_R1_v3_6.csv
   # - 12-well: bc_data_n37_R1_v3_6.csv
   parsebio_barcodes: "/oak/stanford/groups/engreitz/Users/tonyzeng/GW_PERTURB/references/ParseBiosciences-Pipeline.1.6.0/splitpipe/barcodes/bc_data_n198_v5.csv"
-  
+
   # Guide reference file for QC analysis
   guide_reference: "references_yann_k562/k562_yann_guides_qc_reference.txt"
-
-
 
   # IT IS OPTIONAL TO ADJUST THESE -> -> ->
   # If not doing undetermined read recovery (processing="raw" only), this file is not used
   primer_info_file: "/oak/stanford/groups/engreitz/Users/tonyzeng/GW_PERTURB/references/split_lp_primer.xlsx"
-  
+
   # Gene annotation reference files
   ribosomal_genes: "/oak/stanford/groups/engreitz/Users/tonyzeng/GW_PERTURB/references/ribosomal.txt"
   cell_cycle_genes: "/oak/stanford/groups/engreitz/Users/tonyzeng/GW_PERTURB/references/regev_lab_cell_cycle_genes.txt"
@@ -70,16 +66,14 @@ input_paths:
 
   # Reference genome/index locations
   reference_base: "/oak/stanford/groups/engreitz/Users/tonyzeng/GW_PERTURB/references"
-  nascent_genome: "nascent_all"  # Subdirectory with genome index files
-  
-
+  nascent_genome: "nascent_all" # Subdirectory with genome index files
 
 # IT IS OPTIONAL TO ADJUST THESE -> -> ->
 
 # Cell calling parameters
 cell_calling:
   # Methods to run (comment out any methods you want to skip)
-  # Available methods: Expected_Cells, UMI_Threshold, 
+  # Available methods: Expected_Cells, UMI_Threshold,
   #                   EmptyDrops_FDR_X (where X is the FDR cutoff, e.g., EmptyDrops_FDR_0.001),
   #                   BarcodeRanks_Knee, BarcodeRanks_Inflection
   #
@@ -91,24 +85,24 @@ cell_calling:
     - Expected_Cells
     - UMI_Threshold
     # - EmptyDrops_FDR_0.001  # DEPRECATED - too lenient for current data
-    # - EmptyDrops_FDR_0.01   # DEPRECATED - too lenient for current data  
+    # - EmptyDrops_FDR_0.01   # DEPRECATED - too lenient for current data
     # - EmptyDrops_FDR_0.05   # DEPRECATED - too lenient for current data
     - BarcodeRanks_Knee
     - BarcodeRanks_Inflection
-  
+
   # Default method to use for saturation analysis and other downstream analyses
   default_method: "Expected_Cells"
-  
+
   # Default parameters (will be overridden by sample_info.tsv values)
   defaults:
     expected_cells: 5000
     min_umi_threshold: 100
-    emptydrops_lower: 100  # DEPRECATED - kept for backwards compatibility
+    emptydrops_lower: 100 # DEPRECATED - kept for backwards compatibility
     saturation_points: [0.1, 0.25, 0.5, 0.75, 1.0]
 
 # Barcode recovery parameters
 barcode_recovery:
-  max_reads_recovery: null  # null = process all reads
+  max_reads_recovery: null # null = process all reads
   max_shift: 4
 
 # Undetermined recovery parameters
@@ -127,7 +121,7 @@ sublibrary_filtering:
 
 # QC filtering parameters
 qc_filtering:
-  gmm_fallback_method: "percentile_95"  # Fallback method when 2D GMM doesn't converge
+  gmm_fallback_method: "percentile_95" # Fallback method when 2D GMM doesn't converge
 
 # Cell quality filtering thresholds
 # NOTE: These are currently UNUSED in the pipeline - apply_cell_filters() is never called
@@ -143,24 +137,24 @@ qc_filtering:
 resources:
   # Heavy compute rules (kallisto alignment)
   alignment:
-    mem_mb: 64000   # 64GB (reduced for smaller datasets)
-    threads: 8      # Reduced threads for smaller datasets
-  
+    mem_mb: 64000 # 64GB (reduced for smaller datasets)
+    threads: 8 # Reduced threads for smaller datasets
+
   # Heavy memory rules (matrix operations, cell calling)
   analysis:
-    mem_mb: 64000   # 64GB (reduced for smaller datasets)
-    threads: 4      # Moderate parallelization for smaller datasets
-  
+    mem_mb: 64000 # 64GB (reduced for smaller datasets)
+    threads: 4 # Moderate parallelization for smaller datasets
+
   # Light rules (QC, stats, file operations)
   light:
-    mem_mb: 32000   # 32GB
+    mem_mb: 32000 # 32GB
     threads: 4
 
 # Sublibrary combination configuration
 combination:
   groups:
     all_pools:
-      pools: []  # Empty = all pools
+      pools: [] # Empty = all pools
       name: "all_combined"
   combine_all_pools: true
 
@@ -179,16 +173,16 @@ combined_sublibraries:
 
 # Perturbation preprocessing configuration
 preprocessing:
-  target_genes: ["TP53", "CDKN1A", "FDPS", "RABGGTA", "MRPL34", "QARS"]  # Target genes for analysis
-  use_gpu: false  # Use GPU acceleration (requires RAPIDS)
-  target_clusters: 3  # Target number of clusters for leiden clustering
-  n_hvgs: 2000  # Number of highly variable genes
-  clustering_resolutions: [0.05, 0.1, 0.15, 0.2, 0.3, 0.5]  # Leiden clustering resolutions to try
-  
+  target_genes: ["TP53", "CDKN1A", "FDPS", "RABGGTA", "MRPL34", "QARS"] # Target genes for analysis
+  use_gpu: false # Use GPU acceleration (requires RAPIDS)
+  target_clusters: 3 # Target number of clusters for leiden clustering
+  n_hvgs: 2000 # Number of highly variable genes
+  clustering_resolutions: [0.05, 0.1, 0.15, 0.2, 0.3, 0.5] # Leiden clustering resolutions to try
+
   # Stratification for perturbation analysis
   stratification:
     column: "condition"
     values: ["72hr_wt", "168hr_wt"]
-  
+
   # Non-targeting guide identifiers
   non_targeting_strings: ["non-targeting", "non.targeting"]

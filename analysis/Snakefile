@@ -268,14 +268,6 @@ rule kite_index:
         mem_mb=config["resources"]["alignment"]["mem_mb"],
     shell:
         """
-        # Check if the installed version has the modified collision detection
-        if ! python -c "import kb_python.ref; import inspect; exit(0 if 'remove_collisions' in dir(kb_python.ref) else 1)" 2>/dev/null; then
-            echo "ERROR: The installed kb_python does not have the modified remove_collisions function"
-            echo "Please install the modified version from the kb_python directory"
-            echo "Run: cd /path/to/modified/kb_python && pip install -e ."
-            exit 1
-        fi
-        
         # Remove existing index files to ensure clean build
         rm -rf {params.outdir}/* tmp
         
