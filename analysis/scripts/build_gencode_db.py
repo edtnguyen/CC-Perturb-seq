@@ -19,6 +19,7 @@ import sys
 import os
 import gffutils
 import logging
+import traceback
 
 # Configure logging
 logging.basicConfig(
@@ -84,6 +85,15 @@ def build_database(gtf_path, db_path, force=False, infer_genes=False, infer_tran
         
         logger.info("Database creation complete!")
         
+    except Exception as e:
+        logger.error(f"Failed to create database: {e}")
+        logger.error(traceback.format_exc())
+        # Clean up partial file
+        if os.path.exists(db_path):
+            os.remove(db_path)
+        sys.exit(1)
+
+    try:
         # Validation
         logger.info("Validating database...")
         genes = list(db.features_of_type('gene', limit=5))
@@ -97,11 +107,9 @@ def build_database(gtf_path, db_path, force=False, infer_genes=False, infer_tran
             logger.warning("No 'gene' features found in database. Check input file format.")
             
     except Exception as e:
-        logger.error(f"Failed to create database: {e}")
-        # Clean up partial file
-        if os.path.exists(db_path):
-            os.remove(db_path)
-        sys.exit(1)
+        logger.warning(f"Database created, but validation failed: {e}")
+        logger.warning(traceback.format_exc())
+        # Do not delete the database if ONLY validation fails
 
 def main():
     args = parse_args()
