@@ -96,7 +96,15 @@ def build_database(gtf_path, db_path, force=False, infer_genes=False, infer_tran
     try:
         # Validation
         logger.info("Validating database...")
-        genes = list(db.features_of_type('gene', limit=5))
+        # Note: gffutils features_of_type doesn't support integer limit argument
+        # We need to manually iterate
+        genes_iter = db.features_of_type('gene')
+        genes = []
+        for i, gene in enumerate(genes_iter):
+            if i >= 5:
+                break
+            genes.append(gene)
+            
         if len(genes) > 0:
             logger.info("Successfully retrieved sample gene features:")
             for gene in genes:
