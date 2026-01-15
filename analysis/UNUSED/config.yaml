@@ -1,0 +1,176 @@
+# Configuration file for GW_PERTURB analysis
+
+# Analysis name (used for scratch subdirectory)
+analysis_name: "gw_analysis"
+
+# Sample information file
+sample_info_file: "/oak/stanford/groups/engreitz/Users/tonyzeng/GW_PERTURB/references/sample_info.xlsx"
+plate_maps_file: "/oak/stanford/groups/engreitz/Users/tonyzeng/GW_PERTURB/references/plate_maps.xlsx"  # Plate well-to-sample mappings
+
+# Sample IDs - will be automatically discovered from sample_info.xlsx
+# Leave empty to process all samples, or specify specific samples
+# TESTING: Process 2 paired GEX/guide libraries from pool3 for testing
+#sample_ids: ["gex_batch_1", "gex_batch_2", "gex_batch_3", "guide_batch_1", "guide_batch_2", "guide_batch_3"]
+sample_ids: []
+
+# User-specified input paths (must exist before running pipeline)
+input_paths:
+  # Reference files
+  replace_file: "/oak/stanford/groups/engreitz/Users/tonyzeng/GW_PERTURB/references/replace.96.txt"
+  barcodes_file: "/oak/stanford/groups/engreitz/Users/tonyzeng/GW_PERTURB/references/barcodes.96.txt"
+  sample_info_file: "/oak/stanford/groups/engreitz/Users/tonyzeng/GW_PERTURB/references/sample_info.xlsx"
+  # Guide reference file for QC analysis - maps guide sequences to target genes
+  guide_reference: "/oak/stanford/groups/engreitz/Users/tonyzeng/GW_PERTURB/references/all_guides.20240917.tsv"
+  # ONLY NEEDED FOR UNDETERMINED READ RECOVERY - maps i5/i7 index sequences to sample names
+  # If not doing undetermined read recovery (processing="raw" only), this file is not used
+  primer_info_file: "/oak/stanford/groups/engreitz/Users/tonyzeng/GW_PERTURB/references/split_lp_primer.xlsx"
+  
+  # Reference genome/index locations
+  reference_base: "/oak/stanford/groups/engreitz/Users/tonyzeng/GW_PERTURB/references"
+  nascent_genome: "nascent_all"  # Subdirectory with genome index files
+  
+  # Base directory for raw sequencing data (deprecated - use fastq_dir in sample_info.xlsx instead)
+  raw_data_base: "/oak/stanford/groups/engreitz/Users/tonyzeng/GW_PERTURB/data"
+
+# Pipeline-created output paths
+output_paths:
+  # The analysis_name will be used as subdirectory under $SCRATCH environment variable
+  temp_subdir: "gw_analysis_tmp"  # Temp directory under $SCRATCH
+  
+  # Local outputs (relative to working directory)
+  results_base: "/oak/stanford/groups/engreitz/Users/tonyzeng/GW_PERTURB/analysis_results"
+  logs_base: "/oak/stanford/groups/engreitz/Users/tonyzeng/GW_PERTURB/analysis_logs"
+
+
+# Guide library configuration
+guide_file: "/oak/stanford/groups/engreitz/Users/tonyzeng/GW_PERTURB/references/guides/250313_ucsf_guides.txt"  # Full path to guide sequences file for kallisto indexing
+
+# Analysis parameters
+analysis:
+  genome_types: ["all"]
+  index_prefix: "nascent"
+  threads: 24
+  kb_chemistry: "1,10,18,1,48,56,1,78,86:1,0,10:0,0,0"
+  strand: "forward"
+  # Source/processing combinations for pipeline outputs
+  combinations:
+      #- ["main", "raw"]
+    - ["all", "merged"]
+  
+# Cell calling parameters
+cell_calling:
+  # Methods to run (comment out any methods you want to skip)
+  # Available methods: Expected_Cells, UMI_Threshold, 
+  #                   EmptyDrops_FDR_X (where X is the FDR cutoff, e.g., EmptyDrops_FDR_0.001),
+  #                   BarcodeRanks_Knee, BarcodeRanks_Inflection
+  methods_to_run:
+    - Expected_Cells
+    - UMI_Threshold
+    # - EmptyDrops_FDR_0.001  # Commented out - too lenient for current data
+    # - EmptyDrops_FDR_0.01   # Commented out - too lenient for current data  
+    # - EmptyDrops_FDR_0.05   # Commented out - too lenient for current data
+    - BarcodeRanks_Knee
+    - BarcodeRanks_Inflection
+  
+  # Default method to use for saturation analysis and other downstream analyses
+  default_method: "BarcodeRanks_Knee"  # Changed from hardcoded EmptyDrops_FDR001
+  
+  # Default parameters (will be overridden by sample_info.tsv values)
+  defaults:
+    expected_cells: 5000
+    min_umi_threshold: 100
+    emptydrops_lower: 100
+    saturation_points: [0.1, 0.25, 0.5, 0.75, 1.0]
+
+# Sublibrary combination configuration
+combination:
+  # Define combination groups - each group becomes one combined file
+  # Each group combines sublibraries from the specified pools
+  groups:
+    # Example: Combine all pools into one file
+    all_pools:
+      pools: []  # Empty list means ALL pools (auto-detected from sample_info.xlsx)
+      name: "all_combined"  # Output file prefix
+    
+    # Example: Combine specific pools (uncomment and modify as needed)
+    # early_timepoints:
+    #   pools: ["pool1", "pool2"]  # List specific pools to combine
+    #   name: "early_combined"
+    # 
+    # late_timepoints:
+    #   pools: ["pool3", "pool4"]
+    #   name: "late_combined"
+  
+  # Alternative simple configuration (if you just want all pools combined)
+  # Set to true to combine ALL pools into a single file, or false for per-pool combination
+  combine_all_pools: true
+
+# Barcode recovery parameters
+barcode_recovery:
+  # Maximum number of reads to process (None or omit for all reads)
+  max_reads_recovery: null
+  # Maximum shift to search for barcodes (default: 4)
+  max_shift: 4
+
+# Undetermined recovery parameters
+undetermined_recovery:
+  # Maximum number of files to keep open simultaneously
+  max_open_files: 5000
+
+# QC analysis parameters
+qc_analysis:
+  # Guide counting cutoffs for QC metrics
+  guide_cutoffs: [1, 2, 3, 4, 5]
+
+# Sublibrary filtering parameters
+sublibrary_filtering:
+  # Default cutoff for guide assignment
+  guide_assignment_cutoff: 5
+  # Skip barcode filtering to keep all barcodes (recommended for proper cell calling)
+  skip_barcode_filtering: true
+
+# Analysis-ready file configuration
+# Combined sublibraries configuration
+combined_sublibraries:
+  # Cell calling method to use for combining sublibraries
+  # Options: Expected_Cells, UMI_Threshold, EmptyDrops_FDR_X (where X is FDR cutoff),
+  #          BarcodeRanks_Knee, BarcodeRanks_Inflection
+  cell_calling_method: "BarcodeRanks_Knee"
+  # Output directory for combined files (relative to results_base)
+  output_dir: "combined_sublibraries"
+  # Pools to include (empty list means all pools)
+  pools: []
+  # Mitochondrial cutoff to use from qc_cutoffs.yaml
+  # Basic options: median, median_plus_2mad, median_plus_3mad, percentile_75, percentile_95, percentile_99
+  # Mixture model options (if available): mixture_posterior_50, mixture_posterior_75, mixture_posterior_90,
+  #   mixture_intersection, mixture_low_upper_95
+  mito_cutoff_key: "mixture_posterior_75"
+  # Default minimum UMI count to keep a barcode (reduces memory by filtering ultra-low count barcodes)
+  # NOTE: This filter is ALWAYS applied, even when skip_barcode_filtering is true
+  min_umi_filter: 100
+  # Default mitochondrial percentage cutoff
+  mito_cutoff: 20
+  # Optional: Per-sample filter overrides (YAML file path)
+  # Format: 
+  #   sample_id:
+  #     min_umi_filter: 200
+  #     mito_cutoff: 15
+  # TODO: Implement generation of per-sample filter YAML files in QC scripts
+  #       Based on sample-specific quality metrics (UMI distributions, mito%, etc.)
+  per_sample_filters_file: null  # Set to path if needed
+
+# Perturbation preprocessing configuration
+preprocessing:
+  target_genes: ["TP53", "CDKN1A", "FDPS", "RABGGTA", "MRPL34", "QARS"]  # Target genes for analysis
+  use_gpu: false  # Use GPU acceleration (requires RAPIDS)
+  target_clusters: 3  # Target number of clusters for leiden clustering
+  n_hvgs: 2000  # Number of highly variable genes
+  clustering_resolutions: [0.05, 0.1, 0.15, 0.2, 0.3, 0.5]  # Leiden clustering resolutions to try
+  
+  # Stratification for perturbation analysis
+  stratification:
+    column: "condition"
+    values: ["72hr_wt", "168hr_wt"]
+  
+  # Non-targeting guide identifiers
+  non_targeting_strings: ["non-targeting", "non.targeting"]
