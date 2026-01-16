@@ -15,6 +15,13 @@ if [ -z "$CONFIG" ]; then
 fi
 CONFIG_FILE="$CONFIG"
 
+# Ensure we're in the kb conda environment
+if [[ "$CONDA_DEFAULT_ENV" != "kb" ]]; then
+    echo "Error: Must be in 'kb' conda environment"
+    echo "Run: conda activate kb"
+    exit 1
+fi
+
 # Extract SLURM settings from config file
 
 # Extract SLURM settings from config file
@@ -24,12 +31,7 @@ SLURM_ACCOUNT=$(python -c "import yaml; config = yaml.safe_load(open('$CONFIG_FI
 echo "DEBUG: Extracted Partition: '$SLURM_PARTITION'"
 echo "DEBUG: Extracted Account: '$SLURM_ACCOUNT'"
 
-# Ensure we're in the kb conda environment
-if [[ "$CONDA_DEFAULT_ENV" != "kb" ]]; then
-    echo "Error: Must be in 'kb' conda environment"
-    echo "Run: conda activate kb"
-    exit 1
-fi
+
 
 # Default arguments that can be overridden
 # Resource defaults:
