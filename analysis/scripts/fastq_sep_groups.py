@@ -3,10 +3,11 @@
 # 2021-08-10 RTK; v0.2 set gzip compress level to 4 (only mod; hardcoded)
 # 2022-06-21 RTK; v0.4 Update for kits WT, WT_mini, WT_mega
 # 2024-04-22 RTK; v0.5 Update for chem v1-v3, new barcodes (pipeline v1.3.0)
+# 2026-01-31; v0.6 Load barcodes from ../barcodes; v1-v2 kits only
 #
 # Separate fastq reads by well group
 #
-# Barcode data is hardcoded as encoded strings (search jstring bar)
+# Barcode data is loaded from ../barcodes folder (relative to this script)
 #
 
 import argparse
@@ -14,19 +15,19 @@ import os
 import sys
 import gzip
 import json
-import zlib
-import base64
 import datetime
 import re
 import numpy as np
 import pandas as pd
 
 
-__version__ = "V0.5; RTK 2024-04-22"
+__version__ = "V0.6; 2026-01-31"
 VERSION = os.path.basename(__file__) + " " + __version__
 
 
 DEF_BC_EDIT_DIST = 2
+
+BC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "barcodes"))
 
 GZIP_COMPRESSLEVEL = 4
 GZIP_REC_BUFFER = 1000
@@ -69,6 +70,10 @@ Description
     If a given kit does not match the guessed kit, or if the best kit score
     is too low, kit score checking may be bypassed (via --kit_score_skip)
     To simply check kit (and not process fastqs), run with --dryrun option.
+
+    -------------------
+    Barcode data is loaded from ../barcodes (relative to this script). It should
+    contain matching bc_data_*.csv and bc_dict_*.json files.
 
     -------------------
     Sample well groups are specified by <name> and <wells>.
@@ -175,7 +180,10 @@ def main():
     print_now("# Initializing...")
 
     # Collection of all barcode data
-    all_bc_dict = jstring_to_bc_dict()
+    all_bc_dict = bc_dir_to_bc_dict()
+    if not all_bc_dict:
+        print("Problem loading barcode data")
+        return False
     print_now(f"# Loaded barcode data ({len(all_bc_dict)} bc sets)")
     # Sample of bc fastq
     fq2_df = fastq_bc_seqs_df(args.fq2, args.amp_seq)
@@ -390,9 +398,6 @@ KIT_CHEM_DEFS = """
     WT_mini     v2    1       12      1       n24_v4        v1      v1     normal
     WT          v2    4       12      1       n99_v5        v1      v1     normal
     WT_mega     v2    8       12      1       n198_v5       v1      v1     normal
-    WT_mini     v3    1       12      1       n26_R1_v3_3   v1      R3_v3  normal
-    WT          v3    4       12      1       n107_R1_v3_3  v1      R3_v3  normal
-    WT_mega     v3    8       12      1       n222_R1_v3_3  v1      R3_v3  normal
 """
 
 
@@ -810,65 +815,80 @@ def range_story(r_ends):
     return story
 
 
-# -------------------------- Decode barcode data -----------------------------
+# --------------------------- Load barcode data ------------------------------
 #
-def jstring_to_bc_dict(jstrings=None):
-    """Load all barcode data structs (from encoded string)
+def bc_dir_to_bc_dict(bc_dir=BC_DIR, bc_sets=None):
+    """Load all barcode data structs from bc_data_*.csv and bc_dict_*.json
 
     Return dict with [name] = {'data': data, 'dict': dict}
     """
-    # If not given string (normal in script), then process global string
-    global global_bc_jstrings
-    if not jstrings:
-        jstrings = global_bc_jstrings
+    if not bc_dir:
+        print("Problem: barcode folder not specified")
+        return None
 
-    # Split big string into lines to process
-    # lines = jstrings.split("\n")
-    # print(f"Total {len(lines)} lines in string with {len(jstrings)} char")
+    bc_dir = os.path.expanduser(os.path.expandvars(bc_dir))
+    bc_dir = os.path.abspath(bc_dir)
+    if not os.path.isdir(bc_dir):
+        print(f"Problem: barcode folder not found: {bc_dir}")
+        return None
 
-    # Collect data(frames) and dicts for each barcode
-    bc_data = {}
-    bc_dict = {}
-    # Init name, data lines and data type
-    name = dlines = dtype = ""
-    # Split string by line to process
-    for line in jstrings.split("\n"):
-        if line.startswith(">bc_d"):
-            # print(line)
-            # Prior collected data
-            if dlines:
-                # String to object (dict)
-                obj = json.loads(zlib.decompress(base64.b64decode(dlines)))
-                # Seq data saved as dict but should be dataframe
-                if dtype == "data":
-                    obj = pd.DataFrame(obj)
-                # Save to dict
-                save_dict = bc_data if dtype == "data" else bc_dict
-                save_dict[name] = obj
-                # Next encoded obj
-                dlines = ""
-            # New name and type; Header like:
-            #   >bc_data n192_v4 from bc_data_n192_v4.csv
-            dtype = "dict" if "bc_dict" in line else "data"
-            name = line.split()[1]
-        else:
-            dlines += line.strip()
-    # Last one
-    if dlines:
-        # String to object (dict)
-        obj = json.loads(zlib.decompress(base64.b64decode(dlines)))
-        # Seq data saved as dict but should be dataframe
-        if dtype == "data":
-            obj = pd.DataFrame(obj)
-        # Save to dict
-        save_dict = bc_data if dtype == "data" else bc_dict
-        save_dict[name] = obj
+    if bc_sets is None:
+        bc_sets = set(KIT_CHEM_TAB[["bc1", "bc2", "bc3"]].values.flatten())
+    bc_sets = {s for s in bc_sets if s}
 
-    # Combined data and dict per barcode set
+    data_files = [
+        f for f in os.listdir(bc_dir) if f.startswith("bc_data_") and f.endswith(".csv")
+    ]
+    if not data_files:
+        print(f"Problem: no bc_data_*.csv files found in {bc_dir}")
+        return None
+
     new_dict = {}
-    for k in bc_data.keys():
-        new_key = k.replace("bc_data_", "")
-        new_dict[new_key] = {"data": bc_data[k], "dict": bc_dict[k]}
+    for fname in sorted(data_files):
+        name = fname[len("bc_data_") : -len(".csv")]
+        if bc_sets and name not in bc_sets:
+            continue
+        data_path = os.path.join(bc_dir, fname)
+        dict_path = os.path.join(bc_dir, f"bc_dict_{name}.json")
+
+        if not os.path.exists(dict_path):
+            print(f"Warning: missing barcode dict for {name}; skipping")
+            continue
+
+        try:
+            bc_df = pd.read_csv(data_path)
+        except Exception as e:
+            print(f"Problem reading barcode data file: {data_path}")
+            print(e)
+            return None
+
+        if "bci" in bc_df.columns:
+            try:
+                bc_df["bci"] = bc_df["bci"].astype(int)
+                bc_df = bc_df.set_index("bci", drop=True)
+            except Exception:
+                print(
+                    f"Warning: could not set 'bci' index for {data_path}; using default index"
+                )
+        else:
+            print(f"Warning: 'bci' column missing in {data_path}; using default index")
+
+        try:
+            with open(dict_path) as dfile:
+                bc_dict = json.load(dfile)
+        except Exception as e:
+            print(f"Problem reading barcode dict file: {dict_path}")
+            print(e)
+            return None
+
+        new_dict[name] = {"data": bc_df, "dict": bc_dict}
+
+    if bc_sets:
+        missing = sorted([bc for bc in bc_sets if bc not in new_dict])
+        if missing:
+            print(f"Problem: missing barcode sets: {', '.join(missing)}")
+            return None
+
     return new_dict
 
 
@@ -1191,6 +1211,10 @@ def get_barcode_info(comargs, all_bc_dict):
         # First element has nothing
         #if i == 0:
         #    continue
+
+        if bc not in all_bc_dict:
+            print(f"Problem: barcode set '{bc}' not found in {BC_DIR}")
+            return None
 
         # Edit-dist dict
         # Need to make sure edit dist keys are int (not str, as get from json decode)
