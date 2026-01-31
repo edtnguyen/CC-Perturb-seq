@@ -1192,8 +1192,7 @@ def get_barcode_info(comargs, all_bc_dict):
     Return bc_info dict with lists of bc data
     """
     bc_info = {}
-    # Barcode sequences and error-correct edit-dist dicts encoded as strings
-    # These are global variables, so can get via name
+    # Barcode sequences and error-correct edit-dist dicts loaded from files
 
     # Get (1-based) list of barcode set names based on kit
     bc_list = kit_bc_set_list(comargs.kit, comargs.chemistry)
