@@ -280,7 +280,6 @@ def main():
     bc1_dict2 = bc_dicts[1].get(2, {})
     bci_oset_dict_local = bci_oset_dict
     bc_replace_get = bc_replace_map.get if bc_replace_map else None
-    read_stats_local = read_stats
 
     def get_min_edit_dists_fast(bc):
         """Fast path for edit distance <= 2"""
@@ -315,6 +314,7 @@ def main():
         "index_no_outs": 0,
         "total_outputs": 0,
     }
+    read_stats_local = read_stats
 
     # Run through fastq records
     print_now("# Processing reads...")
