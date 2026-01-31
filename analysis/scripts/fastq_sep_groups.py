@@ -72,8 +72,15 @@ Description
     To simply check kit (and not process fastqs), run with --dryrun option.
 
     -------------------
-    Barcode data is loaded from ../barcodes (relative to this script). It should
-    contain matching bc_data_*.csv and bc_dict_*.json files.
+    Barcode data is loaded from ../barcodes (relative to this script). Use
+    --bcpath to override. The folder should contain matching bc_data_*.csv and
+    bc_dict_*.json files.
+
+    -------------------
+    Optional barcode replacement file (--bc_replace) format:
+        <left_bc> *<right_bc>
+    Reads with bc1 matching right_bc (after edit-distance correction) are mapped
+    to left_bc before well assignment. Invalid entries are warned and skipped.
 
     -------------------
     Sample well groups are specified by <name> and <wells>.
@@ -117,8 +124,16 @@ def main():
         metavar=("NAME", "WELLS"),
         help="Add group name and well specification; See '--explain' for format",
     )
+    parser.add_argument(
+        "--bc_replace",
+        help="Barcode replacement file; format: <left_bc> *<right_bc>",
+    )
     parser.add_argument("--obase", help="Output file basename")
     parser.add_argument("--opath", help="Output file path; Will create if needed")
+    parser.add_argument(
+        "--bcpath",
+        help="Barcode folder path; default is ../barcodes relative to this script",
+    )
     parser.add_argument(
         "--only_stats",
         default=0,
@@ -180,7 +195,7 @@ def main():
     print_now("# Initializing...")
 
     # Collection of all barcode data
-    all_bc_dict = bc_dir_to_bc_dict()
+    all_bc_dict = bc_dir_to_bc_dict(args.bcpath)
     if not all_bc_dict:
         print("Problem loading barcode data")
         return False
@@ -211,6 +226,13 @@ def main():
     bc_info = get_barcode_info(args, all_bc_dict)
     if not bc_info:
         print("Problem getting barcodes")
+        return False
+    # Optional barcode replacements
+    bc_replace_map = load_bc_replace_map(
+        args.bc_replace, set(bc_info["bc_seqs"][1])
+    )
+    if bc_replace_map is None:
+        print("Problem loading barcode replacement file")
         return False
 
     # Get input fastq file handles
@@ -330,6 +352,9 @@ def main():
             read_stats["reads_valid_bc"] += 1
         else:
             continue
+        # Apply barcode replacements after edit-distance correction
+        if bc_replace_map:
+            mat_list = [bc_replace_map.get(bc, bc) for bc in mat_list]
 
         # Well index for barcodes; Use set in case multiple possibilities
         match_bci_set = set()
@@ -726,6 +751,15 @@ def check_options(comargs):
             report_valid_kits()
             return False
 
+    # Barcode folder
+    if comargs.bcpath:
+        comargs.bcpath = os.path.expanduser(os.path.expandvars(comargs.bcpath))
+    if comargs.bc_replace:
+        comargs.bc_replace = check_infile(comargs.bc_replace, verb=True)
+        if not comargs.bc_replace:
+            print("Problem with barcode replacement file")
+            return False
+
     # Ouptut filename prefix
     if comargs.no_opref:
         comargs.opref = ""
@@ -817,14 +851,60 @@ def range_story(r_ends):
 
 # --------------------------- Load barcode data ------------------------------
 #
+def load_bc_replace_map(fname, bc1_set=None):
+    """Load bc1 replacement map
+
+    Format: <left_bc> *<right_bc>
+    Returns dict mapping right_bc -> left_bc
+    """
+    if not fname:
+        return {}
+
+    bc1_set = set([b.upper() for b in bc1_set]) if bc1_set else None
+    repl_map = {}
+
+    with open(fname) as infile:
+        for line_num, line in enumerate(infile, start=1):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split()
+            if len(parts) < 2:
+                print(f"Warning: bad bc_replace line {line_num}; skipping")
+                continue
+            left = parts[0].strip().upper()
+            right = parts[1].strip().upper()
+            if right.startswith("*"):
+                right = right[1:]
+            if not (DNA_REGEX.match(left) and DNA_REGEX.match(right)):
+                print(f"Warning: bad bc_replace line {line_num}; skipping")
+                continue
+            if bc1_set and left not in bc1_set:
+                print(
+                    f"Warning: bc_replace target '{left}' not in bc1 set; skipping"
+                )
+                continue
+            if bc1_set and right not in bc1_set:
+                print(
+                    f"Warning: bc_replace source '{right}' not in bc1 set; skipping"
+                )
+                continue
+            if right in repl_map and repl_map[right] != left:
+                print(
+                    f"Warning: bc_replace duplicate for '{right}'; using latest mapping"
+                )
+            repl_map[right] = left
+
+    return repl_map
+
+
 def bc_dir_to_bc_dict(bc_dir=BC_DIR, bc_sets=None):
     """Load all barcode data structs from bc_data_*.csv and bc_dict_*.json
 
     Return dict with [name] = {'data': data, 'dict': dict}
     """
     if not bc_dir:
-        print("Problem: barcode folder not specified")
-        return None
+        bc_dir = BC_DIR
 
     bc_dir = os.path.expanduser(os.path.expandvars(bc_dir))
     bc_dir = os.path.abspath(bc_dir)
@@ -835,6 +915,25 @@ def bc_dir_to_bc_dict(bc_dir=BC_DIR, bc_sets=None):
     if bc_sets is None:
         bc_sets = set(KIT_CHEM_TAB[["bc1", "bc2", "bc3"]].values.flatten())
     bc_sets = {s for s in bc_sets if s}
+
+    if bc_sets:
+        missing_pairs = []
+        for name in sorted(bc_sets):
+            data_path = os.path.join(bc_dir, f"bc_data_{name}.csv")
+            dict_path = os.path.join(bc_dir, f"bc_dict_{name}.json")
+            missing = []
+            if not os.path.exists(data_path):
+                missing.append("data")
+            if not os.path.exists(dict_path):
+                missing.append("dict")
+            if missing:
+                missing_pairs.append(f"{name} ({', '.join(missing)})")
+        if missing_pairs:
+            print(
+                "Problem: missing barcode files for required sets: "
+                + ", ".join(missing_pairs)
+            )
+            return None
 
     data_files = [
         f for f in os.listdir(bc_dir) if f.startswith("bc_data_") and f.endswith(".csv")
@@ -1206,13 +1305,14 @@ def get_barcode_info(comargs, all_bc_dict):
     bc_seq_to_wind = [None]
     num_wells = [0]
 
+    bc_path = comargs.bcpath if comargs.bcpath else BC_DIR
     for i, bc in enumerate(bc_list):
         # First element has nothing
         #if i == 0:
         #    continue
 
         if bc not in all_bc_dict:
-            print(f"Problem: barcode set '{bc}' not found in {BC_DIR}")
+            print(f"Problem: barcode set '{bc}' not found in {bc_path}")
             return None
 
         # Edit-dist dict
@@ -1575,6 +1675,8 @@ def report_settings(comargs, bc_info, out_sets):
     print(f"# Amplicon      {bc_info['amp_seq']}")
     print(f"# Max edit dist {comargs.edit_dist}")
     print("# Matching      Permissive first barcode matches")
+    bc_path = comargs.bcpath if comargs.bcpath else BC_DIR
+    print(f"# Barcode path  {bc_path}")
     print(f"# Out path      {comargs.opath}")
     print(f"# Out base      {comargs.obase}")
     print("#")
@@ -1633,3 +1735,7 @@ def get_min_edit_dists(bc, edit_dict, max_d):
         if edit_dist >= max_d:
             break
     return bc_matches, edit_dist, found
+
+
+if __name__ == "__main__":
+    sys.exit(0 if main() else 1)
