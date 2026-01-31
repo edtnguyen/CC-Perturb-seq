@@ -275,6 +275,27 @@ def main():
     bc_ends = bc_info["bc_ends"]
     # Mapping of bc seqs to well index (1-based int)
     bc1_bc_seq_to_wind = bc_info["bc_seq_to_wind"][1]
+    bc1_dict0 = bc_dicts[1].get(0, {})
+    bc1_dict1 = bc_dicts[1].get(1, {})
+    bc1_dict2 = bc_dicts[1].get(2, {})
+    bci_oset_dict_local = bci_oset_dict
+    bc_replace_get = bc_replace_map.get if bc_replace_map else None
+    read_stats_local = read_stats
+
+    def get_min_edit_dists_fast(bc):
+        """Fast path for edit distance <= 2"""
+        bc_matches = bc1_dict0.get(bc)
+        if bc_matches:
+            return bc_matches, 0, True
+        if bc_max_edist >= 1:
+            bc_matches = bc1_dict1.get(bc)
+            if bc_matches:
+                return bc_matches, 1, True
+        if bc_max_edist >= 2:
+            bc_matches = bc1_dict2.get(bc)
+            if bc_matches:
+                return bc_matches, 2, True
+        return [], bc_max_edist if bc_max_edist else 0, False
 
     # Init counter
     read_stats = {
@@ -316,7 +337,7 @@ def main():
             continue
         if args.rec_last and (n_rec > args.rec_last):
             break
-        read_stats["number_of_reads"] += 1
+        read_stats_local["number_of_reads"] += 1
 
         if (n_rec % UPDATE_FREQ) == 0:
             print_now(f"# record {n_rec}")
@@ -334,27 +355,27 @@ def main():
         # Get barcodes (actually only bc1)
         seq2 = seql2.decode().strip()
         if len(seq2) < s2_min_len:
-            read_stats["reads_too_short"] += 1
+            read_stats_local["reads_too_short"] += 1
             continue
 
         rbc1 = seq2[bc_starts[1] : bc_ends[1]]
         if "N" in rbc1:
-            read_stats["reads_ambig_bc1"] += 1
+            read_stats_local["reads_ambig_bc1"] += 1
 
         # Find matching (perfect) barcodes for raw bc1
-        mat_list, ed_max, found = get_min_edit_dists(rbc1, bc_dicts[1], bc_max_edist)
+        mat_list, ed_max, found = get_min_edit_dists_fast(rbc1)
         if not found:
             ed_max = "NA"
         ed_key = f"bc_edit_dist_{ed_max}"
-        read_stats[ed_key] += 1
+        read_stats_local[ed_key] += 1
         # valid if any found
         if mat_list:
-            read_stats["reads_valid_bc"] += 1
+            read_stats_local["reads_valid_bc"] += 1
         else:
             continue
         # Apply barcode replacements after edit-distance correction
-        if bc_replace_map:
-            mat_list = [bc_replace_map.get(bc, bc) for bc in mat_list]
+        if bc_replace_get:
+            mat_list = [bc_replace_get(bc, bc) for bc in mat_list]
 
         # Well index for barcodes; Use set in case multiple possibilities
         match_bci_set = set()
@@ -365,17 +386,17 @@ def main():
         # Handle all sample matches; Get unique set of outputs (groups)
         u_osets = set()
         for bc_idx in match_bci_set:
-            if bc_idx in bci_oset_dict:
-                for oset in bci_oset_dict[bc_idx]:
+            if bc_idx in bci_oset_dict_local:
+                for oset in bci_oset_dict_local[bc_idx]:
                     u_osets.add(oset)
 
         # Process unique outputs
         if u_osets:
-            read_stats["index_with_outs"] += 1
+            read_stats_local["index_with_outs"] += 1
             if len(u_osets) > 1:
-                read_stats["index_mult_outs"] += 1
+                read_stats_local["index_mult_outs"] += 1
             for oset in u_osets:
-                read_stats["total_outputs"] += 1
+                read_stats_local["total_outputs"] += 1
                 oset.inc_count()
                 if args.only_stats:
                     continue
@@ -387,7 +408,7 @@ def main():
                     print(f"Number reads so far {read_stats['number_of_reads']}")
                     print(oset)
         else:
-            read_stats["index_no_outs"] += 1
+            read_stats_local["index_no_outs"] += 1
     # Stats
     read_stats = add_Q30_stats(read_stats, fq2_df)
     print("=" * 70)
