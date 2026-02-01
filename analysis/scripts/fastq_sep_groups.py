@@ -78,9 +78,9 @@ Description
 
     -------------------
     Optional barcode replacement file (--bc_replace) format:
-        <left_bc> *<right_bc>
-    Reads with bc1 matching right_bc (after edit-distance correction) are mapped
-    to left_bc before well assignment. Invalid entries are warned and skipped.
+        <source_bc> *<target_bc>
+    Reads with bc1 matching source_bc (after edit-distance correction) are mapped
+    to target_bc before well assignment. Invalid entries are warned and skipped.
 
     -------------------
     Sample well groups are specified by <name> and <wells>.
@@ -126,13 +126,23 @@ def main():
     )
     parser.add_argument(
         "--bc_replace",
-        help="Barcode replacement file; format: <left_bc> *<right_bc>",
+        help="Barcode replacement file; format: <source_bc> *<target_bc>",
     )
     parser.add_argument("--obase", help="Output file basename")
     parser.add_argument("--opath", help="Output file path; Will create if needed")
     parser.add_argument(
         "--bcpath",
         help="Barcode folder path; default is ../barcodes relative to this script",
+    )
+    parser.add_argument(
+        "--gzip_level",
+        type=int,
+        help="Gzip compression level (1-9). Lower is faster, larger files.",
+    )
+    parser.add_argument(
+        "--gzip_buffer",
+        type=int,
+        help="Buffered records per write (larger can improve throughput).",
     )
     parser.add_argument(
         "--only_stats",
@@ -171,6 +181,11 @@ def main():
     )
     parser.add_argument(
         "-V", "--version", action="version", version="%(prog)s " + __version__
+    )
+    parser.add_argument(
+        "--synthetic_checks",
+        action="store_true",
+        help="Run synthetic sanity checks and exit",
     )
     args = parser.parse_args()
 
@@ -275,25 +290,124 @@ def main():
     bc_ends = bc_info["bc_ends"]
     # Mapping of bc seqs to well index (1-based int)
     bc1_bc_seq_to_wind = bc_info["bc_seq_to_wind"][1]
-    bc1_dict0 = bc_dicts[1].get(0, {})
-    bc1_dict1 = bc_dicts[1].get(1, {})
-    bc1_dict2 = bc_dicts[1].get(2, {})
+    # Flat lookup for observed bc -> (matches, edit_dist)
+    bc1_lookup = {}
+    for _ed in range(bc_max_edist + 1):
+        ed_dict = bc_dicts[1].get(_ed, {})
+        for obs, mats in ed_dict.items():
+            if obs not in bc1_lookup:
+                bc1_lookup[obs] = (mats, _ed)
+    bc1_lookup_get = bc1_lookup.get
     bci_oset_dict_local = bci_oset_dict
     bc_replace_get = bc_replace_map.get if bc_replace_map else None
 
+    # ---------------------------------------------------------------------
+    # Canonical BC1 rewriting + fix for duplicated BC1 between polyT(H12) and
+    # random-hexamer(A1) due to primer ordering error.
+    #
+    # Goal:
+    #   - For every output read, rewrite the BC1 substring in R2 to a single
+    #     canonical per-well BC1 (prefer polyT barcode for that well).
+    #   - If a read's corrected BC1 includes the duplicated sequence, disambiguate
+    #     using a polyT signal from R2 tail and then rewrite BC1 in output.
+    # ---------------------------------------------------------------------
+
+    # Duplicated BC1 sequence (polyT H12) that also appears in hexamer A1 (as ordered)
+    DUP_BC1 = "ACATTTGG"
+    A1_CANON_SEQ = "CATTCCTA"
+    if DUP_BC1 not in bc1_bc_seq_to_wind:
+        print(f"Problem: DUP_BC1 '{DUP_BC1}' not found in bc1 set")
+        return False
+    if A1_CANON_SEQ not in bc1_bc_seq_to_wind:
+        print(f"Problem: A1_CANON_SEQ '{A1_CANON_SEQ}' not found in bc1 set")
+        return False
+
+    # PolyT heuristic on the R2 tail region after BC1.
+    TAIL_WIN = 20
+    MIN_LONGEST_T = 10
+    MIN_T_FRACTION = 0.70
+    SHIFT_OFFSETS = [-2, -1, 0, 1, 2]
+
+    def _max_run(seq, base):
+        max_run = cur = 0
+        for b in seq:
+            if b == base:
+                cur += 1
+                if cur > max_run:
+                    max_run = cur
+            else:
+                cur = 0
+        return max_run
+
+    def classify_polyt_from_r2_tail(seq2_str: str, bc1_end: int) -> bool:
+        best_longest = 0
+        best_frac = 0.0
+        for off in SHIFT_OFFSETS:
+            start = bc1_end + off
+            if start < 0:
+                continue
+            tail = seq2_str[start : start + TAIL_WIN].upper()
+            if not tail:
+                continue
+            run = _max_run(tail, "T")
+            frac = tail.count("T") / max(1, len(tail))
+            if run > best_longest:
+                best_longest = run
+            if frac > best_frac:
+                best_frac = frac
+        return (best_longest >= MIN_LONGEST_T) or (best_frac >= MIN_T_FRACTION)
+
+    def _run_synthetic_checks():
+        errors = []
+        bc1_len = bc_ends[1] - bc_starts[1]
+        if bc1_len != len(DUP_BC1):
+            errors.append(
+                f"BC1 length mismatch: expected {len(DUP_BC1)} got {bc1_len}"
+            )
+
+        def _make_seq(bc1, tail_seq):
+            total_len = max(bc_ends[1] + TAIL_WIN, s2_min_len)
+            seq = ["C"] * total_len
+            seq[bc_starts[1] : bc_ends[1]] = list(bc1)
+            seq[bc_ends[1] : bc_ends[1] + len(tail_seq)] = list(tail_seq)
+            return "".join(seq)
+
+        # Case 1: DUP + polyT tail -> polyt
+        tail_polyt = "T" * TAIL_WIN
+        seq_polyt = _make_seq(DUP_BC1, tail_polyt)
+        cls_polyt = classify_polyt_from_r2_tail(seq_polyt, bc_ends[1])
+        if cls_polyt is not True:
+            errors.append("Expected polyT classification for T-tail")
+        seq_out = seq_polyt[: bc_starts[1]] + DUP_BC1 + seq_polyt[bc_ends[1] :]
+        if seq_out[bc_starts[1] : bc_ends[1]] != DUP_BC1:
+            errors.append("BC1 rewrite failed for polyT target")
+
+        # Case 2: DUP + non-polyT tail -> hex
+        tail_hex = ("ACGCGTACGA" * ((TAIL_WIN // 10) + 1))[:TAIL_WIN]
+        seq_hex = _make_seq(DUP_BC1, tail_hex)
+        cls_hex = classify_polyt_from_r2_tail(seq_hex, bc_ends[1])
+        if cls_hex is not False:
+            errors.append("Expected hex classification for mixed tail")
+        seq_out = seq_hex[: bc_starts[1]] + A1_CANON_SEQ + seq_hex[bc_ends[1] :]
+        if seq_out[bc_starts[1] : bc_ends[1]] != A1_CANON_SEQ:
+            errors.append("BC1 rewrite failed for hex target")
+
+        if errors:
+            print("Synthetic checks failed:")
+            for e in errors:
+                print(f"  - {e}")
+            return False
+        print("Synthetic checks passed")
+        return True
+
+    if args.synthetic_checks:
+        return _run_synthetic_checks()
+
     def get_min_edit_dists_fast(bc):
-        """Fast path for edit distance <= 2"""
-        bc_matches = bc1_dict0.get(bc)
-        if bc_matches:
-            return bc_matches, 0, True
-        if bc_max_edist >= 1:
-            bc_matches = bc1_dict1.get(bc)
-            if bc_matches:
-                return bc_matches, 1, True
-        if bc_max_edist >= 2:
-            bc_matches = bc1_dict2.get(bc)
-            if bc_matches:
-                return bc_matches, 2, True
+        """Fast path using flat lookup for edit distance <= 2"""
+        rec = bc1_lookup_get(bc)
+        if rec:
+            return rec[0], rec[1], True
         return [], bc_max_edist if bc_max_edist else 0, False
 
     # Init counter
@@ -313,6 +427,10 @@ def main():
         "index_mult_outs": 0,
         "index_no_outs": 0,
         "total_outputs": 0,
+        "bc1_dup_candidate": 0,
+        "bc1_dup_polyT": 0,
+        "bc1_dup_nonpolyT_to_A1": 0,
+        "bc1_rewrite_done": 0,
     }
     read_stats_local = read_stats
 
@@ -358,12 +476,12 @@ def main():
             read_stats_local["reads_too_short"] += 1
             continue
 
-        rbc1 = seq2[bc_starts[1] : bc_ends[1]]
-        if "N" in rbc1:
+        rbc1_raw = seq2[bc_starts[1] : bc_ends[1]].upper()
+        if "N" in rbc1_raw:
             read_stats_local["reads_ambig_bc1"] += 1
 
-        # Find matching (perfect) barcodes for raw bc1
-        mat_list, ed_max, found = get_min_edit_dists_fast(rbc1)
+        # Find matching barcodes for raw bc1
+        mat_list, ed_max, found = get_min_edit_dists_fast(rbc1_raw)
         if not found:
             ed_max = "NA"
         ed_key = f"bc_edit_dist_{ed_max}"
@@ -373,16 +491,32 @@ def main():
             read_stats_local["reads_valid_bc"] += 1
         else:
             continue
-        # Apply barcode replacements after edit-distance correction
+        # Disambiguate duplicated BC1 using polyT signal from R2 tail
+        if DUP_BC1 in mat_list:
+            read_stats_local["bc1_dup_candidate"] += 1
+            is_polyt = classify_polyt_from_r2_tail(seq2, bc_ends[1])
+            if is_polyt:
+                read_stats_local["bc1_dup_polyT"] += 1
+                mat_list = [DUP_BC1]
+            else:
+                read_stats_local["bc1_dup_nonpolyT_to_A1"] += 1
+                mat_list = [A1_CANON_SEQ]
+
+        # Apply barcode replacements after disambiguation
         if bc_replace_get:
             mat_list = [bc_replace_get(bc, bc) for bc in mat_list]
 
+        final_bcs = mat_list
+        wind_to_bc = {}
+        for bc in final_bcs:
+            w = bc1_bc_seq_to_wind[bc]
+            if w not in wind_to_bc:
+                wind_to_bc[w] = bc
+
         # Well index for barcodes; Use set in case multiple possibilities
         match_bci_set = set()
-        for bc in mat_list:
-            wind = bc1_bc_seq_to_wind[bc]
-            match_bci_set.add(wind)
-
+        for w in wind_to_bc:
+            match_bci_set.add(w)
         # Handle all sample matches; Get unique set of outputs (groups)
         u_osets = set()
         for bc_idx in match_bci_set:
@@ -400,9 +534,20 @@ def main():
                 oset.inc_count()
                 if args.only_stats:
                     continue
+                seql2_out = seql2
+                cand_winds = match_bci_set & oset.get_iset()
+                if len(cand_winds) == 1:
+                    _wind = next(iter(cand_winds))
+                    _final_bc1 = wind_to_bc.get(_wind)
+                    if _final_bc1 and (_final_bc1 != rbc1_raw):
+                        seq2_out = (
+                            seq2[: bc_starts[1]] + _final_bc1 + seq2[bc_ends[1] :]
+                        )
+                        seql2_out = (seq2_out + "\n").encode()
+                        read_stats_local["bc1_rewrite_done"] += 1
                 # Object handles writing
                 if not oset.write_rec(
-                    head1, seql1, plus1, qual1, head2, seql2, plus2, qual2
+                    head1, seql1, plus1, qual1, head2, seql2_out, plus2, qual2
                 ):
                     print(f"Problem writing output for {oset.get_name()}; Bailing")
                     print(f"Number reads so far {read_stats['number_of_reads']}")
@@ -780,6 +925,19 @@ def check_options(comargs):
         if not comargs.bc_replace:
             print("Problem with barcode replacement file")
             return False
+    # Gzip tuning
+    if comargs.gzip_level is not None:
+        if not 1 <= comargs.gzip_level <= 9:
+            print(f"Problem: gzip_level must be 1-9; got {comargs.gzip_level}")
+            return False
+        global GZIP_COMPRESSLEVEL
+        GZIP_COMPRESSLEVEL = comargs.gzip_level
+    if comargs.gzip_buffer is not None:
+        if comargs.gzip_buffer < 1:
+            print(f"Problem: gzip_buffer must be >= 1; got {comargs.gzip_buffer}")
+            return False
+        global GZIP_REC_BUFFER
+        GZIP_REC_BUFFER = comargs.gzip_buffer
 
     # Ouptut filename prefix
     if comargs.no_opref:
@@ -875,8 +1033,8 @@ def range_story(r_ends):
 def load_bc_replace_map(fname, bc1_set=None):
     """Load bc1 replacement map
 
-    Format: <left_bc> *<right_bc>
-    Returns dict mapping right_bc -> left_bc
+    Format: <source_bc> *<target_bc>
+    Returns dict mapping source_bc -> target_bc
     """
     if not fname:
         return {}
@@ -893,28 +1051,28 @@ def load_bc_replace_map(fname, bc1_set=None):
             if len(parts) < 2:
                 print(f"Warning: bad bc_replace line {line_num}; skipping")
                 continue
-            left = parts[0].strip().upper()
-            right = parts[1].strip().upper()
-            if right.startswith("*"):
-                right = right[1:]
-            if not (DNA_REGEX.match(left) and DNA_REGEX.match(right)):
+            source = parts[0].strip().upper()
+            target = parts[1].strip().upper()
+            if target.startswith("*"):
+                target = target[1:]
+            if not (DNA_REGEX.match(source) and DNA_REGEX.match(target)):
                 print(f"Warning: bad bc_replace line {line_num}; skipping")
                 continue
-            if bc1_set and left not in bc1_set:
+            if bc1_set and source not in bc1_set:
                 print(
-                    f"Warning: bc_replace target '{left}' not in bc1 set; skipping"
+                    f"Warning: bc_replace source '{source}' not in bc1 set; skipping"
                 )
                 continue
-            if bc1_set and right not in bc1_set:
+            if bc1_set and target not in bc1_set:
                 print(
-                    f"Warning: bc_replace source '{right}' not in bc1 set; skipping"
+                    f"Warning: bc_replace target '{target}' not in bc1 set; skipping"
                 )
                 continue
-            if right in repl_map and repl_map[right] != left:
+            if source in repl_map and repl_map[source] != target:
                 print(
-                    f"Warning: bc_replace duplicate for '{right}'; using latest mapping"
+                    f"Warning: bc_replace duplicate for '{source}'; using latest mapping"
                 )
-            repl_map[right] = left
+            repl_map[source] = target
 
     return repl_map
 
