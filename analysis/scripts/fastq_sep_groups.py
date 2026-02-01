@@ -492,7 +492,9 @@ def main():
         else:
             continue
         # Disambiguate duplicated BC1 using polyT signal from R2 tail
+        dup_triggered = False
         if DUP_BC1 in mat_list:
+            dup_triggered = True
             read_stats_local["bc1_dup_candidate"] += 1
             is_polyt = classify_polyt_from_r2_tail(seq2, bc_ends[1])
             if is_polyt:
@@ -535,16 +537,17 @@ def main():
                 if args.only_stats:
                     continue
                 seql2_out = seql2
-                cand_winds = match_bci_set & oset.get_iset()
-                if len(cand_winds) == 1:
-                    _wind = next(iter(cand_winds))
-                    _final_bc1 = wind_to_bc.get(_wind)
-                    if _final_bc1 and (_final_bc1 != rbc1_raw):
-                        seq2_out = (
-                            seq2[: bc_starts[1]] + _final_bc1 + seq2[bc_ends[1] :]
-                        )
-                        seql2_out = (seq2_out + "\n").encode()
-                        read_stats_local["bc1_rewrite_done"] += 1
+                if dup_triggered:
+                    cand_winds = match_bci_set & oset.get_iset()
+                    if len(cand_winds) == 1:
+                        _wind = next(iter(cand_winds))
+                        _final_bc1 = wind_to_bc.get(_wind)
+                        if _final_bc1 and (_final_bc1 != rbc1_raw):
+                            seq2_out = (
+                                seq2[: bc_starts[1]] + _final_bc1 + seq2[bc_ends[1] :]
+                            )
+                            seql2_out = (seq2_out + "\n").encode()
+                            read_stats_local["bc1_rewrite_done"] += 1
                 # Object handles writing
                 if not oset.write_rec(
                     head1, seql1, plus1, qual1, head2, seql2_out, plus2, qual2
