@@ -1798,14 +1798,15 @@ class Outset(object):
             self.fq1 = self.fq2 = None
 
     def init_buffers(self):
-        self.r1_buf = b""
-        self.r2_buf = b""
+        # Using list-of-bytes avoids quadratic-time `bytes += ...` copies.
+        self.r1_chunks = []
+        self.r2_chunks = []
         self.n_buf = 0
 
     def write_rec(self, head1, seq1, plus1, qual1, head2, seq2, plus2, qual2):
         """Handle writing for two fastq records; Four lines each R1 R2"""
-        self.r1_buf += head1 + seq1 + plus1 + qual1
-        self.r2_buf += head2 + seq2 + plus2 + qual2
+        self.r1_chunks.extend((head1, seq1, plus1, qual1))
+        self.r2_chunks.extend((head2, seq2, plus2, qual2))
         self.n_buf += 1
         if self.n_buf >= GZIP_REC_BUFFER:
             self.write_out_bufs()
@@ -1813,11 +1814,11 @@ class Outset(object):
         return True
 
     def write_out_bufs(self):
-        """Write any bufferd lines to file"""
-        if self.r1_buf:
+        """Write any buffered lines to file"""
+        if self.n_buf:
             ofile1, ofile2 = self.get_ofiles()
-            ofile1.write(self.r1_buf)
-            ofile2.write(self.r2_buf)
+            ofile1.write(b"".join(self.r1_chunks))
+            ofile2.write(b"".join(self.r2_chunks))
             # Reset buffer
             self.init_buffers()
 
