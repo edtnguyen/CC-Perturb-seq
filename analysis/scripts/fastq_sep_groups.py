@@ -431,6 +431,7 @@ def main():
         "bc1_dup_polyT": 0,
         "bc1_dup_nonpolyT_to_A1": 0,
         "bc1_rewrite_done": 0,
+        "reads_written": 0,
     }
     read_stats_local = read_stats
 
@@ -531,6 +532,8 @@ def main():
             read_stats_local["index_with_outs"] += 1
             if len(u_osets) > 1:
                 read_stats_local["index_mult_outs"] += 1
+                # Drop ambiguous reads (mapped to multiple groups)
+                continue
             for oset in u_osets:
                 read_stats_local["total_outputs"] += 1
                 oset.inc_count()
@@ -555,12 +558,16 @@ def main():
                     print(f"Problem writing output for {oset.get_name()}; Bailing")
                     print(f"Number reads so far {read_stats['number_of_reads']}")
                     print(oset)
+                else:
+                    read_stats_local["reads_written"] += 1
         else:
             read_stats_local["index_no_outs"] += 1
     # Stats
     read_stats = add_Q30_stats(read_stats, fq2_df)
     print("=" * 70)
     for k, v in read_stats.items():
+        if k == "total_outputs":
+            continue
         print(f"{k}\t{v}")
     print()
     for oset in out_sets:
